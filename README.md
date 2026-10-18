@@ -1,80 +1,83 @@
-# NumPy Linear Regression — Interview Cheat Sheet
+# Melbourne House Price Prediction
 
-A from-scratch linear regression engine for Melbourne house prices. The implementation uses NumPy for the model and optimization math, with explicit MSE, MAE, and Huber losses plus Batch Gradient Descent and Stochastic Gradient Descent (SGD).
+This project explores how a house-price prediction model learns from data. Its core is a linear regression engine written with NumPy: given a home's features, it produces an estimated price, measures how far that estimate is from the known price, and adjusts its parameters to improve future predictions.
 
-## Linear Regression
+The goal is to make that learning process visible in code. The model, loss functions, and gradient descent updates are implemented directly rather than delegated to a machine-learning estimator.
 
-For `m` examples and `n` features:
+## How a prediction is made
 
-\[
-\hat{y} = Xw + b
-\]
+The trainer uses `Resources/clean_melbourne_housing.csv`. For each house, it prepares these inputs:
 
-- `X ∈ ℝ^{m×n}`: feature matrix; `w ∈ ℝ^n`: coefficients; `b ∈ ℝ`: bias.
-- Each prediction is `ŷᵢ = xᵢᵀw + b`.
-- The trainer standardizes numeric features and target, and one-hot encodes `Type` and `Region`.
+- Numeric: `Rooms`, `Distance`, `Bathroom`, and `Car`.
+- Categorical: `Type` and `Region`, converted into one-hot features so the model can work with them numerically.
 
-## Loss Functions
+Numeric features are standardized so that values with different units and ranges are on comparable scales. The target `Price` is standardized during training too. The model combines the prepared features with learned weights and a bias to produce a predicted, standardized price. The saved target mean and scale can convert that prediction back to the dataset's price units.
 
-Let residual `eᵢ = ŷᵢ − yᵢ`, with `m` observations.
+In short, each feature has a learned contribution to the prediction. The model starts with initial weights and bias, then learns values that better fit the examples in the dataset.
 
-| Loss | Objective `J` | Gradient w.r.t. prediction `ŷᵢ` | Interview takeaway |
-| --- | --- | --- | --- |
-| **MSE** | `\(\frac{1}{m}\sum_i e_i^2\)` | `\(\frac{2e_i}{m}\)` | Smooth gradient; squaring makes large errors and outliers disproportionately influential. |
-| **MAE** | `\(\frac{1}{m}\sum_i |e_i|\)` | `\(\frac{\operatorname{sign}(e_i)}{m}\)` | More robust to outliers; not differentiable at zero, so this implementation uses the subgradient `sign(0) = 0`. |
-| **Huber** | `\(\frac{1}{m}\sum_i L_\delta(e_i)\)` | `\(\frac{\operatorname{clip}(e_i,-\delta,\delta)}{m}\)` | Quadratic for small residuals and linear for large ones; balances smoothness with outlier robustness. |
+## How the model learns
 
-\[
-L_\delta(e) =
-\begin{cases}
-\frac{1}{2}e^2 & |e| \leq \delta \\
-\delta(|e| - \frac{1}{2}\delta) & |e| > \delta
-\end{cases}
-\]
+Training repeats three steps:
 
-The trainer uses `δ = 1` in standardized target units. Loss and prediction gradients are implemented in [`model/loss_functions.py`](model/loss_functions.py).
+1. **Predict:** Use the current weights and bias to estimate prices for the training houses.
+2. **Measure error:** Compare predictions with the known prices using a loss function. Lower loss means predictions are closer overall under that loss's definition.
+3. **Update:** Gradient Descent calculates how each weight and the bias contributed to the error, then nudges them in a direction that should reduce the loss.
 
-## Gradient Descent
+This process runs for the requested number of epochs. An epoch is one training round. The trainer records the full training-set loss after every epoch in the output JSON, so you can inspect whether learning is progressing. The loss history is measured on training data; it does not show how well the model predicts houses it has never seen.
 
-By the chain rule, for prediction gradient `g = ∂J/∂ŷ`:
+### Loss options
 
-\[
-\nabla_w J = X^Tg, \qquad \frac{\partial J}{\partial b} = \sum_i g_i
-\]
+The loss function defines what kinds of prediction errors the model should care about:
 
-Update parameters in the direction opposite the gradient:
+- **MSE (Mean Squared Error):** Squares each error before averaging. Large errors count much more heavily, which makes MSE sensitive to outliers. Its smooth gradient is useful for optimization.
+- **MAE (Mean Absolute Error):** Averages the absolute size of errors. Its penalty grows steadily, so unusually large errors have less influence than with MSE. At a perfect prediction, the absolute-value loss has no unique derivative; this implementation uses a valid subgradient there.
+- **Huber loss:** Uses a squared penalty for small errors and an absolute-error-like penalty for large ones. It combines smooth behavior around a good fit with less sensitivity to extreme errors. The trainer uses a threshold of `1` in standardized price units.
 
-\[
-w \leftarrow w - \alpha\nabla_w J, \qquad b \leftarrow b - \alpha\frac{\partial J}{\partial b}
-\]
+### Gradient Descent options
 
-`α` is the learning rate. Since each implemented loss gradient is averaged over examples, the Batch GD gradients are mean gradients. See [`model/gradient_descent.py`](model/gradient_descent.py).
+Gradient Descent is the optimization method that changes the model's weights and bias to reduce the chosen loss. The learning rate controls the size of each change. If it is too high, the loss may jump around or grow; if too low, improvement can be slow.
 
-| Method | Update | Strength | Trade-off |
-| --- | --- | --- | --- |
-| **Batch GD** | One vectorized update after computing gradients over all `m` rows | Stable, smooth progress | Each update costs a full pass over the dataset. |
-| **SGD** | Update once per shuffled row, using that row's gradient | Frequent, inexpensive updates; can begin improving quickly | Noisy loss trajectory and more sensitivity to learning rate. |
+- **Batch:** Calculates one update using all training rows. Its updates are stable and vectorized, but each update requires a pass over the dataset.
+- **SGD:** Shuffles the rows and updates after each individual example. It makes many small updates per epoch, but those updates are noisier. A fixed random seed makes the shuffle repeatable.
 
-SGD shuffles row indices at each epoch using a seeded NumPy random generator. Both methods record the selected loss over the full dataset after each epoch. Training and preprocessing are in [`model/train_numpy.py`](model/train_numpy.py).
+The optimizer records loss over the full dataset at the end of each epoch for either method. See [`model/gradient_descent.py`](model/gradient_descent.py) for the update logic and [`model/loss_functions.py`](model/loss_functions.py) for the loss calculations.
 
-## Interview Quick Answers
+## Project files
 
-- **Why standardize features before Gradient Descent?** Features on very different scales create unbalanced gradients and make one learning rate hard to use. Standardization improves conditioning and makes updates more balanced.
-- **Why standardize the target too?** It keeps prediction residuals and gradients at a manageable scale. Convert predictions back with `price = standardized_prediction × target_scale + target_mean`.
-- **Does Linear Regression have local minima?** With a linear model and a convex loss such as MSE, the objective is convex in `w` and `b`; every local minimum is global. A poor learning rate can still prevent convergence.
-- **What if the learning rate is too large or too small?** Too large can overshoot, oscillate, or diverge. Too small converges slowly. Start with a modest value, inspect the loss curve, and tune against validation data.
-- **When choose MSE, MAE, or Huber?** Use MSE when large errors should be strongly penalized; MAE when outlier resistance matters; Huber when you want MSE-like behavior near zero and less influence from extreme residuals.
-- **What does this project's loss history tell you?** It shows optimization behavior on training data, not generalization. A validation split is needed to assess performance on unseen houses.
+```text
+Resources/clean_melbourne_housing.csv  Dataset used by the NumPy trainer
+model/
+  train_numpy.py                        Loads data, prepares features, trains, saves results
+  linear_regression.py                  Linear model: predictions from features, weights, and bias
+  gradient_descent.py                   Batch and SGD parameter updates
+  loss_functions.py                     MSE, MAE, Huber loss and prediction gradients
+```
 
-## Run the NumPy Trainer
+## Run training
 
-From the repository root with Python and NumPy installed:
+From the project root, create a Python environment, install NumPy, and start training:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
+python -m pip install "numpy>=1.24,<3"
 python -m model.train_numpy --loss mse --method batch --learning-rate 0.03 --epochs 500
 ```
 
-- Loss options: `mse`, `mae`, `huber`.
-- Optimizer options: `batch`, `sgd`.
-- Output: `model/linear_regression_numpy.json`, containing fitted parameters, preprocessing values, and per-epoch training loss.
-- The current trainer reports training loss only; it does not calculate validation metrics.
+Choose a loss and optimization method with `--loss mse|mae|huber` and `--method batch|sgd`. For example, SGD often needs a smaller learning rate:
+
+```bash
+python -m model.train_numpy --loss mae --method sgd --learning-rate 0.001 --epochs 20
+```
+
+After training, `model/linear_regression_numpy.json` contains the learned weights and bias, feature and scaling information, selected loss and method, number of training rows, and the loss after each epoch. The generated file is ignored by Git.
+
+## What this version demonstrates
+
+- How house data is transformed into numeric model inputs.
+- How Linear Regression turns those inputs into a price estimate.
+- How a loss function scores the difference between predicted and known prices.
+- How Batch Gradient Descent and SGD use that error to update model parameters.
+- How the selected loss changes over training epochs.
+
+The trainer currently fits and reports loss on the full dataset. It does not create a validation/test split, calculate metrics on unseen houses, or claim production-grade prediction accuracy. Those steps are needed before judging how well the model generalizes.
