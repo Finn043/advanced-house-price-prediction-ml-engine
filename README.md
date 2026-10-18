@@ -72,12 +72,44 @@ python -m model.train_numpy --loss mae --method sgd --learning-rate 0.001 --epoc
 
 After training, `model/linear_regression_numpy.json` contains the learned weights and bias, feature and scaling information, selected loss and method, number of training rows, and the loss after each epoch. The generated file is ignored by Git.
 
+## Run the web app
+
+The React + TypeScript interface uses Tailwind CSS and communicates with a FastAPI service. The API trains the NumPy model, returns the epoch loss history for the chart, and applies the saved preprocessing values when estimating a property's price.
+
+Install the API dependencies and start FastAPI from the repository root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
+python -m pip install -r backend/requirements.txt
+python -m uvicorn backend.main:app --reload --port 8000
+```
+
+In another terminal, start the frontend:
+
+```bash
+cd frontend
+npm ci
+cp .env.example .env           # Windows: copy .env.example .env
+npm run dev
+```
+
+Open the Vite URL printed in the terminal (usually `http://localhost:5173`). The frontend reads `VITE_API_URL` from `frontend/.env`; it defaults to `http://localhost:8000`. FastAPI serves its interactive API documentation at `http://localhost:8000/docs`.
+
+The dashboard lets you choose MSE, MAE, or Huber loss; Batch GD or SGD; a learning rate; and an epoch count. After training, it plots the returned training-loss history and enables property price estimates using the newly trained model.
+
+### Deploy the frontend to Netlify
+
+`netlify.toml` sets `frontend` as the build base, runs `npm run build`, and publishes `dist`. Deploy the FastAPI service separately, then set the Netlify build environment variable `VITE_API_URL` to the public API URL. Configure the API host's `FRONTEND_ORIGIN` variable with the Netlify site origin so browser requests pass FastAPI's CORS policy.
+
+Netlify does not run the Python API from this configuration; the backend must be reachable at the configured URL for training and prediction to work.
+
 ## What this version demonstrates
 
 - How house data is transformed into numeric model inputs.
 - How Linear Regression turns those inputs into a price estimate.
 - How a loss function scores the difference between predicted and known prices.
 - How Batch Gradient Descent and SGD use that error to update model parameters.
-- How the selected loss changes over training epochs.
+- How the selected loss changes over training epochs in the dashboard learning curve.
 
 The trainer currently fits and reports loss on the full dataset. It does not create a validation/test split, calculate metrics on unseen houses, or claim production-grade prediction accuracy. Those steps are needed before judging how well the model generalizes.
